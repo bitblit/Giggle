@@ -1,23 +1,30 @@
 package com.erigir.giggle;
 
-import javafx.application.Application;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import javafx.application.Platform;
+import javafx.beans.value.ChangeListener;
+import javafx.concurrent.Worker;
 import javafx.scene.Scene;
+import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
 import javafx.stage.Stage;
-import javafx.stage.StageStyle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.awt.*;
-import java.io.*;
+import javax.net.ssl.HttpsURLConnection;
+import java.io.BufferedReader;
+import java.io.DataOutputStream;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.math.BigInteger;
 import java.net.*;
 import java.security.SecureRandom;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
-import java.util.concurrent.*;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * 1) Start a http listener on localhost
@@ -28,69 +35,60 @@ import java.util.concurrent.*;
  *
  * Created by cweiss1271 on 9/20/16.
  */
-public class Giggle extends Application{
+public class Giggle extends Stage{
     private static final Logger LOG = LoggerFactory.getLogger(Giggle.class);
 
-    private String applicationId;
-    private InformationReceiver informationRecipient;
+    private GoogleExchanger exchanger;
+
     private int returnPort = 65100; // Default Giggle port
     private String postLoginUrl="https://www.google.com";
-    private Stage parentPrimaryStage;
+    private Scene scene;
+    final WebView browser = new WebView();
+    final WebEngine webEngine = browser.getEngine();
 
-    public Giggle(String applicationId, InformationReceiver informationRecipient,Stage parentPrimaryStage) {
-        this.applicationId = Objects.requireNonNull(applicationId);
-        this.informationRecipient = Objects.requireNonNull(informationRecipient);
-        this.parentPrimaryStage = parentPrimaryStage;
 
+    public Giggle(GoogleExchanger exchanger){
+        super();
+        this.exchanger = Objects.requireNonNull(exchanger);
     }
 
-    @Override
-    public void start(Stage primaryStage) throws Exception {
+    public Future<GiggleResponse>  startLogin(){
+        LOG.info("Starting listener for response");
+        String securityToken = exchanger.buildSecurityToken();
+        Future<GiggleResponse> response = Executors.newSingleThreadExecutor().submit(new ListenForGiggleResponse(this,securityToken));
+        // create the scene
+        setTitle("Web View");
 
+        URI uri = exchanger.buildGoogleUri(securityToken);
+
+        //apply the styles
+        //getStyleClass().add("browser");
+        // load the web page
+        LOG.info("About to open browser to {}",uri);
+        webEngine.load(uri.toString());
+        //add the web view to the scene
+        //getChildren().add(browser);
+
+        // WebEngine updates flag when finished loading web page.
+        webEngine.getLoadWorker()
+                .stateProperty()
+                .addListener( (ChangeListener) (obsValue, oldState, newState) -> {
+                    if (newState == Worker.State.SUCCEEDED) {
+                        //pageLoadedProperty.set(true);
+                        LOG.info("Page loaded : {} {} {}",obsValue, oldState, newState);
+                    }
+                });
+
+
+
+        scene = new Scene(browser,750,500, javafx.scene.paint.Color.web("#666970"));
+        setScene(scene);
+        //scene.getStylesheets().add("webviewsample/BrowserToolbar.css");
+        show();
+        return response;
     }
 
-    public void processGoogleLogin()
-    {
-        try {
-            Future<String> googleResponse = Executors.newSingleThreadExecutor().submit(new ListenForGoogleResponse());
-            String securityToken = buildSecurityToken();
-            URI uri = buildGoogleUri(securityToken);
 
-            //Desktop.getDesktop().browse(uri);
-            GiggleLoginWindow loginWindow = new GiggleLoginWindow(uri);
-            Platform.runLater(()->
-            {
-                loginWindow.start(parentPrimaryStage);
-           });
-
-            //WebViewSample wvs = new WebViewSample();
-            //wvs.start(primaryStage);
-
-
-            //Stage stage = new Stage(StageStyle.UTILITY);
-            //WebView wv2 = new WebView();
-            //stage.setScene(new Scene(wv2));
-            //stage.show();
-            //wv2.getEngine().load("https://www.google.com");
-
-            //GiggleLoginWindow
-
-            String value = googleResponse.get(5, TimeUnit.MINUTES);
-            Map<String,String> params = extractParametersFromReturnUrl(value);
-            if (securityToken.equals(params.get("state")))
-            {
-                informationRecipient.receiveGoogleInformation(params.get("code"), new TreeMap<String, String>());
-            }
-            else
-            {
-                throw new RuntimeException("Couldn't process result");
-            }
-        }
-        catch (InterruptedException | ExecutionException | TimeoutException ioe) //| IOException
-        {
-            throw new RuntimeException("IOE",ioe);
-        }
-    }
 
     Map<String,String> extractParametersFromReturnUrl(String returnUrl)
     {
@@ -117,69 +115,18 @@ public class Giggle extends Application{
         return rval;
     }
 
-    private String exchangeCodeForTokens(String code)
+    class ListenForGiggleResponse implements Callable<GiggleResponse>
     {
-        /*POST /oauth2/v4/token HTTP/1.1
-Host: www.googleapis.com
-Content-Type: application/x-www-form-urlencoded
+        private Stage parentStage;
+        private String securityToken;
 
-code=4/v6xr77ewYqhvHSyW6UJ1w7jKwAzu&
-client_id=8819981768.apps.googleusercontent.com&
-client_secret=your_client_secret&
-redirect_uri=https://oauth2.example.com/code&
-grant_type=authorization_code
-*/
-        return null;
-
-
-    }
-
-    private URI buildGoogleTokenExchangeUri(String code, String clientId, String clientSecret)
-    {
-        return null;
-    }
-
-    private URI buildGoogleUri(String securityToken)
-    {
-        try {
-            StringBuilder sb = new StringBuilder();
-            sb.append("https://accounts.google.com/o/oauth2/v2/auth?")
-                    .append("client_id=").append(applicationId)
-                    .append("&response_type=code&scope=openid%20email&redirect_uri=http://localhost:")
-                    .append(returnPort).append("&state=")
-                    .append(securityToken);
-            return new URI(sb.toString());
+        public ListenForGiggleResponse(Stage parentStage,String securityToken) {
+            this.parentStage = parentStage;
+            this.securityToken = securityToken;
         }
-        catch (URISyntaxException use)
-        {
-            throw new RuntimeException("Cant happen",use);
-        }
-    }
 
-    private String buildSecurityToken()
-    {
-        // Create a state token to prevent request forgery.
-        // Store it in the session for later validation.
-        String state = new BigInteger(130, new SecureRandom()).toString(32);
-        return state;
-        /*
-        request.session().attribute("state", state);
-        // Read index.html into memory, and set the client ID,
-        // token state, and application name in the HTML before serving it.
-        return new Scanner(new File("index.html"), "UTF-8")
-                .useDelimiter("\\A").next()
-                .replaceAll("[{]{2}\\s*CLIENT_ID\\s*[}]{2}", CLIENT_ID)
-                .replaceAll("[{]{2}\\s*STATE\\s*[}]{2}", state)
-                .replaceAll("[{]{2}\\s*APPLICATION_NAME\\s*[}]{2}",
-                        APPLICATION_NAME);
-
-        return */
-    }
-
-    class ListenForGoogleResponse implements Callable<String>
-    {
         @Override
-        public String call() throws Exception {
+        public GiggleResponse call() throws Exception {
             LOG.info("About to open port");
             ServerSocket serverSocket = new ServerSocket(returnPort);
             LOG.info("About to open port");
@@ -210,7 +157,22 @@ grant_type=authorization_code
             out.println("Content-Type: text/html");
             out.println("");
             out.println("<html><body><h1>You are logged in, return to the application</h1></body></html>");
-            return allData.toString();
+
+            // Close the window!
+            Platform.runLater(()->parentStage.hide());
+
+            Map<String,String> params = extractParametersFromReturnUrl(allData.toString());
+            if (!securityToken.equals(params.get("state")))
+            {
+                throw new RuntimeException("Couldn't process result");
+            }
+
+            String dataString = exchanger.exchangeCodeForTokens(params.get("code"));
+            Map<String,String> data = new ObjectMapper().readValue(dataString,Map.class);
+
+            return new GiggleResponse().withAccessToken(data.get("access_token")).withExpiresIn(Integer.parseInt(data.get("expires_in")))
+                    .withIdToken(data.get("id_token")).withOauthToken(params.remove("code"))
+                    .withOtherData(params).withTokenType(data.get("token_type"));
      }
     }
 }

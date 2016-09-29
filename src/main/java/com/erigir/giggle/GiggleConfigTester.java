@@ -10,8 +10,8 @@ import javafx.stage.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.net.URI;
-import java.util.Map;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Created by cweiss1271 on 9/20/16.
@@ -20,25 +20,24 @@ public class GiggleConfigTester extends Application{
     private static final Logger LOG = LoggerFactory.getLogger(GiggleConfigTester.class);
 
     private Giggle giggle;
+    private Label resultLabel = new Label("GIGGLE RESPONSE HERE");
 
     public static void main(String[] args) {
-        launch(args);
-        /*
         try
         {
-            if (args.length!=1)
+            if (args.length!=3)
             {
-                System.out.println("GiggleConfigTester {appId}");
+                System.out.println("GiggleConfigTester {appId} {appSecret} {appReturnUrl}");
             }
             else
             {
+                launch(args);
             }
         }
         catch (Exception e)
         {
             e.printStackTrace();
         }
-        */
     }
 
     @Override
@@ -47,22 +46,42 @@ public class GiggleConfigTester extends Application{
 
         Application.Parameters params = getParameters();
         String appId = params.getRaw().get(0);
+        String appSecret = params.getRaw().get(1);
+        String redirUrl = params.getRaw().get(2);
         Label label = new Label("Using app id : "+appId);
         pane.getChildren().add(label);
         // Setup giggle
-        giggle = new Giggle(appId,new TestInformationReceiver(), primaryStage);
+        giggle = new Giggle(new GoogleExchanger().withClientId(appId).withClientSecret(appSecret)
+        .withRedirectUri(redirUrl));//,appSecret,redirUrl);
 
 
         Button login = new Button("Login with Google");
         login.setOnAction((e)->{
             LOG.info("Starting login");
-            giggle.processGoogleLogin();
-            //GiggleLoginWindow wsv = new GiggleLoginWindow(new URI("https://www.yahoo.com"))
-                    ;
-            //wsv.start(primaryStage);
+            Future<GiggleResponse> futureResponse = giggle.startLogin();
+            //giggle.start(primaryStage);
+
+            new Thread(()->{
+                try
+                {
+                    GiggleResponse response = futureResponse.get(5, TimeUnit.MINUTES);
+
+                    LOG.info("Got response: {}",response);
+                    Platform.runLater(()->
+                    {
+                        resultLabel.setText(response.toString());
+                    });
+                }
+                catch (Exception e2)
+                {
+                    LOG.info("Failed to get response",e2);
+                }
+            }).start();
+
         });
 
         pane.getChildren().add(login);
+        pane.getChildren().add(resultLabel);
 
         Scene scene = new Scene(pane, 600, 400);
         primaryStage.setScene(scene);
@@ -73,11 +92,4 @@ public class GiggleConfigTester extends Application{
 
     }
 
-    static class TestInformationReceiver implements InformationReceiver{
-        @Override
-        public void receiveGoogleInformation(String token, Map<String, String> otherData) {
-            System.out.println(String.format("Got token : %s, otherData: %s", token, otherData));
-            System.exit(0);
-        }
-    }
 }
