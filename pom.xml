@@ -1,14 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="http://maven.apache.org/POM/4.0.0"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
-
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
+    <groupId>com.erigir</groupId>
     <artifactId>giggle</artifactId>
-        <groupId>com.erigir</groupId>
     <packaging>jar</packaging>
-    <name>Giggle</name>
     <version>LOCAL-SNAPSHOT</version>
-    <description>A widget to allow Google auth on a local application</description>
-    <url>http://www.erigir.com/Wrench</url>
+    <name>Giggle</name>
+    <description>Giggle - Java Thick Client OpenID Authenticator</description>
+    <url>https://github.com/bitblit/giggle</url>
     <inceptionYear>2016</inceptionYear>
 
     <issueManagement>
@@ -92,7 +92,9 @@
 
     </dependencies>
 
-
+    <!--
+    These plugins are needed so I can sign the jar(s) to send them to Maven Central, and for maven itself
+    -->
     <build>
         <plugins>
             <plugin>
@@ -123,8 +125,76 @@
                     </dependency>
                 </dependencies>
             </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-gpg-plugin</artifactId>
+                <version>1.4</version>
+                <configuration>
+                    <passphrase>${GPG_PASSPHRASE}</passphrase>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>sign-artifacts</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>sign</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>2.9.1</version>
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <artifactId>maven-source-plugin</artifactId>
+                <version>2.2.1</version>
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
+    <reporting>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-report-plugin</artifactId>
+                <version>2.19</version>
+            </plugin>
+        </plugins>
+    </reporting>
+
+    <distributionManagement>
+        <repository>
+            <id>sonatype</id>
+            <url>https://oss.sonatype.org/service/local/staging/deploy/maven2</url>
+        </repository>
+    </distributionManagement>
 
 </project>
+
+        <!--
+
+                   Submitting following the instructions at:
+                   http://wickedsource.org/2013/09/23/releasing-your-project-to-maven-central-guide/
+                   mvn clean javadoc:jar source:jar gpg:sign deploy -Dgpg.passphrase=your_passphrase
+                   https://oss.sonatype.org/
+
+                -->
