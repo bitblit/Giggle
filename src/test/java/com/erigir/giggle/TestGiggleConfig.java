@@ -16,11 +16,13 @@ import java.util.concurrent.TimeUnit;
 /**
  * Created by cweiss1271 on 9/20/16.
  */
-public class GiggleConfigTester extends Application{
-    private static final Logger LOG = LoggerFactory.getLogger(GiggleConfigTester.class);
+public class TestGiggleConfig extends Application{
+    private static final Logger LOG = LoggerFactory.getLogger(TestGiggleConfig.class);
 
     private Giggle giggle;
+    private GiggleNative giggleNative;
     private Label resultLabel = new Label("GIGGLE RESPONSE HERE");
+    private Label nativeResultLabel = new Label("NATIVE GIGGLE RESPONSE HERE");
 
     public static void main(String[] args) {
         try
@@ -50,10 +52,13 @@ public class GiggleConfigTester extends Application{
         String redirUrl = params.getRaw().get(2);
         Label label = new Label("Using app id : "+appId);
         pane.getChildren().add(label);
-        // Setup giggle
-        giggle = new Giggle(new GoogleExchanger().withClientId(appId).withClientSecret(appSecret)
-        .withRedirectUri(redirUrl));//,appSecret,redirUrl);
 
+        GoogleExchanger exchanger = new GoogleExchanger.GoogleExchangerBuilder().withClientId(appId).withClientSecret(appSecret)
+                .withRedirectUri(redirUrl).withFetchType(GoogleFetchType.CODE_ONLY).build();
+        // Setup giggle
+        giggle = new Giggle(exchanger);//,appSecret,redirUrl);
+
+        giggleNative = new GiggleNative(exchanger);
 
         Button login = new Button("Login with Google");
         login.setOnAction((e)->{
@@ -80,8 +85,37 @@ public class GiggleConfigTester extends Application{
 
         });
 
+
+
+        Button loginNative = new Button("Login with Google Native Browser");
+        loginNative.setOnAction((e)->{
+            Future<GiggleResponse> futureNativeResponse = giggleNative.startLogin();
+            //giggle.start(primaryStage);
+
+            new Thread(()->{
+                try
+                {
+                    GiggleResponse response = futureNativeResponse.get(5, TimeUnit.MINUTES);
+
+                    LOG.info("Got response: {}",response);
+                    Platform.runLater(()->
+                    {
+                        nativeResultLabel.setText(response.toString());
+                    });
+                }
+                catch (Exception e2)
+                {
+                    LOG.info("Failed to get response",e2);
+                }
+            }).start();
+
+        });
+
         pane.getChildren().add(login);
         pane.getChildren().add(resultLabel);
+        pane.getChildren().add(loginNative);
+        pane.getChildren().add(nativeResultLabel);
+
 
         Scene scene = new Scene(pane, 600, 400);
         primaryStage.setScene(scene);

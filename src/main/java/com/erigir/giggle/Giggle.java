@@ -1,6 +1,7 @@
 package com.erigir.giggle;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.RuntimeJsonMappingException;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.concurrent.Worker;
@@ -12,10 +13,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.net.ssl.HttpsURLConnection;
-import java.io.BufferedReader;
-import java.io.DataOutputStream;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
+import java.io.*;
 import java.math.BigInteger;
 import java.net.*;
 import java.security.SecureRandom;
@@ -25,8 +23,12 @@ import java.util.TreeMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
+ * 1) Starts a JavaFX Webview to run the goole login
+ * 2) Detect when Google redirects the local browser back to the endpoint and intercept
+ *
  * 1) Start a http listener on localhost
  * 2) Pop open a system browser to google with that port as the redirect target
  *
@@ -41,10 +43,12 @@ public class Giggle extends Stage{
     private GoogleExchanger exchanger;
 
     private int returnPort = 65100; // Default Giggle port
-    private String postLoginUrl="https://www.google.com";
     private Scene scene;
     final WebView browser = new WebView();
     final WebEngine webEngine = browser.getEngine();
+
+    private GiggleResponse gr = null;
+    private final AtomicBoolean signal = new AtomicBoolean(false);
 
 
     public Giggle(GoogleExchanger exchanger){
@@ -54,12 +58,12 @@ public class Giggle extends Stage{
 
     public Future<GiggleResponse>  startLogin(){
         LOG.info("Starting listener for response");
-        String securityToken = exchanger.buildSecurityToken();
-        Future<GiggleResponse> response = Executors.newSingleThreadExecutor().submit(new ListenForGiggleResponse(this,securityToken));
+        //String securityToken = exchanger.buildSecurityToken();
+        Future<GiggleResponse> response = Executors.newSingleThreadExecutor().submit(new ListenForGiggleResponse());
         // create the scene
         setTitle("Web View");
 
-        URI uri = exchanger.buildGoogleUri(securityToken);
+        URI uri = exchanger.buildGoogleUri();
 
         //apply the styles
         //getStyleClass().add("browser");
@@ -73,13 +77,23 @@ public class Giggle extends Stage{
         webEngine.getLoadWorker()
                 .stateProperty()
                 .addListener( (ChangeListener) (obsValue, oldState, newState) -> {
-                    if (newState == Worker.State.SUCCEEDED) {
-                        //pageLoadedProperty.set(true);
-                        LOG.info("Page loaded : {} {} {}",obsValue, oldState, newState);
-                    }
+                    String location = webEngine.getLocation();
+                    LOG.debug("Change {}  to {} : {}",oldState,newState,webEngine.getLocation());
+                    if (location.startsWith("http://localhost:65100"))
+                    {
+                        gr = exchanger.buildResponseFromLocation(location);
+                        LOG.info("Response is {}",gr);
+                        synchronized (signal)
+                        {
+                            // Close the window!
+                            //Platform.runLater(()->hide());
+                            hide();
+
+                            signal.set(true);
+                            signal.notify();
+                        }
+                   }
                 });
-
-
 
         scene = new Scene(browser,750,500, javafx.scene.paint.Color.web("#666970"));
         setScene(scene);
@@ -88,91 +102,21 @@ public class Giggle extends Stage{
         return response;
     }
 
-
-
-    Map<String,String> extractParametersFromReturnUrl(String returnUrl)
-    {
-        Map<String,String> rval = new TreeMap<>();
-        if (returnUrl!=null)
-        {
-            String[] lines = returnUrl.split("\n");
-            if (lines.length>0)
-            {
-                String first = lines[0];
-                int start = first.indexOf('?');
-                if (start!=-1)
-                {
-                    String[] queryPairs = first.substring(start+1).split("&");
-                    for (String s:queryPairs)
-                    {
-                        String[] piece = s.split("=");
-                        rval.put(piece[0],piece[1]);
-                    }
-                }
-            }
-        }
-
-        return rval;
-    }
-
-    class ListenForGiggleResponse implements Callable<GiggleResponse>
-    {
-        private Stage parentStage;
-        private String securityToken;
-
-        public ListenForGiggleResponse(Stage parentStage,String securityToken) {
-            this.parentStage = parentStage;
-            this.securityToken = securityToken;
-        }
+    class ListenForGiggleResponse implements Callable<GiggleResponse> {
 
         @Override
         public GiggleResponse call() throws Exception {
-            LOG.info("About to open port");
-            ServerSocket serverSocket = new ServerSocket(returnPort);
-            LOG.info("About to open port");
-            Socket clientSocket = serverSocket.accept();
-            LOG.info("About to open port");
-            PrintWriter out =
-                    new PrintWriter(clientSocket.getOutputStream(), true);
-            LOG.info("About to open port");
-            BufferedReader in = new BufferedReader(
-                    new InputStreamReader(clientSocket.getInputStream()));
 
-            // Block here until we get a connection
-            LOG.info("About to open port");
-            StringBuilder allData = new StringBuilder();
-            String toRead = in.readLine();
-            while (toRead!=null && toRead.length()>0)
+            while (!signal.get())
             {
-                LOG.info("Read : {} {}",toRead, toRead.length());
-                allData.append(toRead).append("\n");
-                toRead = in.readLine();
+                synchronized (signal)
+                {
+                    signal.wait();
+                }
             }
 
-            LOG.info("Finished reading");
-
-            //out.println("HTTP/1.1 301 Moved Permanently");
-            //out.println("Location: "+postLoginUrl);
-            out.println("HTTP/1.1 200 OK");
-            out.println("Content-Type: text/html");
-            out.println("");
-            out.println("<html><body><h1>You are logged in, return to the application</h1></body></html>");
-
-            // Close the window!
-            Platform.runLater(()->parentStage.hide());
-
-            Map<String,String> params = extractParametersFromReturnUrl(allData.toString());
-            if (!securityToken.equals(params.get("state")))
-            {
-                throw new RuntimeException("Couldn't process result");
-            }
-
-            String dataString = exchanger.exchangeCodeForTokens(params.get("code"));
-            Map<String,String> data = new ObjectMapper().readValue(dataString,Map.class);
-
-            return new GiggleResponse().withAccessToken(data.get("access_token")).withExpiresIn(Integer.parseInt(data.get("expires_in")))
-                    .withIdToken(data.get("id_token")).withOauthToken(params.remove("code"))
-                    .withOtherData(params).withTokenType(data.get("token_type"));
-     }
+            return gr;
+        }
     }
+
 }

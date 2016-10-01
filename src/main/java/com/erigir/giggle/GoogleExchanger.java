@@ -1,5 +1,6 @@
 package com.erigir.giggle;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.concurrent.Worker;
@@ -23,11 +24,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /**
- * 1) Start a http listener on localhost
- * 2) Pop open a system browser to google with that port as the redirect target
- *
- * Working from : https://developers.google.com/identity/protocols/OAuth2InstalledApp (2016-09-20)
- *
+ * Class that wraps up all interaction with Google OpenID
  *
  * Created by cweiss1271 on 9/20/16.
  */
@@ -37,19 +34,51 @@ public class GoogleExchanger{
     private String clientId;
     private String clientSecret;
     private String redirectUri;
+    private GoogleFetchType fetchType;
     private int returnPort = 65100; // Default Giggle port
 
+    // Create a state token to prevent request forgery.
+    // Store it in the session for later validation.
+    private final String securityState = new BigInteger(130, new SecureRandom()).toString(32);
 
-    public GoogleExchanger() {
+    private GoogleExchanger() {
         super();
-        // This version is used by other JavaFX clients
-        //this.clientId = Objects.requireNonNull(clientId);
-        //this.clientSecret = Objects.requireNonNull(clientSecret);
-        //this.redirectUri = Objects.requireNonNull(redirectUri);
     }
 
+    public int getReturnPort() {
+        return returnPort;
+    }
 
-    Map<String,String> extractParametersFromReturnUrl(String returnUrl)
+    public GiggleResponse buildResponseFromLocation(String location)
+    {
+        GiggleResponse rval = null;
+        Map<String,String> params = GoogleExchanger.extractParametersFromReturnUrl(location);
+        if (!securityState.equals(params.get("state")))
+        {
+            throw new RuntimeException("Couldn't process result");
+        }
+
+        rval = new GiggleResponse().withOtherData(params).withOauthToken(params.remove("code"));
+
+        if (fetchType==GoogleFetchType.ACCESS_TOKEN)
+        {
+            String dataString = exchangeCodeForTokens(params.get("code"));
+            try {
+                Map<String, String> data = new ObjectMapper().readValue(dataString, Map.class);
+
+                rval = rval.withAccessToken(data.get("access_token")).withExpiresIn(Integer.parseInt(String.valueOf(data.get("expires_in"))))
+                        .withIdToken(data.get("id_token")).withTokenType(data.get("token_type"));
+            }
+            catch (IOException ioe)
+            {
+                throw new RuntimeException(ioe);
+            }
+        }
+
+        return rval;
+    }
+
+    public static final Map<String,String> extractParametersFromReturnUrl(String returnUrl)
     {
         Map<String,String> rval = new TreeMap<>();
         if (returnUrl!=null)
@@ -126,7 +155,7 @@ public class GoogleExchanger{
         return sb.toString();
     }
 
-    protected final URI buildGoogleUri(String securityToken)
+    protected final URI buildGoogleUri()
     {
         try {
             StringBuilder sb = new StringBuilder();
@@ -134,7 +163,7 @@ public class GoogleExchanger{
                     .append("client_id=").append(clientId)
                     .append("&response_type=code&scope=openid%20email&redirect_uri=http://localhost:")
                     .append(returnPort).append("&state=")
-                    .append(securityToken);
+                    .append(securityState);
             return new URI(sb.toString());
         }
         catch (URISyntaxException use)
@@ -143,33 +172,58 @@ public class GoogleExchanger{
         }
     }
 
-    protected final String buildSecurityToken()
+    public static class GoogleExchangerBuilder
     {
-        // Create a state token to prevent request forgery.
-        // Store it in the session for later validation.
-        String state = new BigInteger(130, new SecureRandom()).toString(32);
-        return state;
-    }
+        private String clientId;
+        private String clientSecret;
+        private String redirectUri;
+        private GoogleFetchType fetchType;
+        private int returnPort = 65100; // Default Giggle port
 
-    public GoogleExchanger withClientId(final String clientId) {
-        this.clientId = Objects.requireNonNull(clientId);
-        return this;
-    }
+        public GoogleExchanger build()
+        {
+            Objects.requireNonNull(clientId, "Client Id is required");
+            Objects.requireNonNull(fetchType, "Fetch type is required");
+            if (fetchType==GoogleFetchType.ACCESS_TOKEN)
+            {
+                Objects.requireNonNull(clientSecret, "Client Secret is required if fetch type is ACCESS_TOKEN");
+                Objects.requireNonNull(redirectUri, "Redirect URI is required if fetch type is ACCESS_TOKEN");
+            }
+            GoogleExchanger rval = new GoogleExchanger();
+            rval.clientId = clientId;
+            rval.clientSecret = clientSecret;
+            rval.redirectUri = redirectUri;
+            rval.fetchType = fetchType;
+            rval.returnPort = returnPort;
+            return rval;
+        }
 
-    public GoogleExchanger withClientSecret(final String clientSecret) {
-        this.clientSecret = Objects.requireNonNull(clientSecret);
-        return this;
-    }
+        public GoogleExchangerBuilder withClientId(final String clientId) {
+            this.clientId = clientId;
+            return this;
+        }
 
-    public GoogleExchanger withRedirectUri(final String redirectUri) {
-        this.redirectUri = Objects.requireNonNull(redirectUri);
-        return this;
-    }
+        public GoogleExchangerBuilder withClientSecret(final String clientSecret) {
+            this.clientSecret = clientSecret;
+            return this;
+        }
 
-    public GoogleExchanger withReturnPort(final int returnPort) {
-        this.returnPort = returnPort;
-        return this;
-    }
+        public GoogleExchangerBuilder withRedirectUri(final String redirectUri) {
+            this.redirectUri = redirectUri;
+            return this;
+        }
 
+        public GoogleExchangerBuilder withFetchType(final GoogleFetchType fetchType) {
+            this.fetchType = fetchType;
+            return this;
+        }
+
+        public GoogleExchangerBuilder withReturnPort(final int returnPort) {
+            this.returnPort = returnPort;
+            return this;
+        }
+
+
+    }
 
 }
