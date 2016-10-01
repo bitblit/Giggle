@@ -14,44 +14,70 @@ public class GiggleResponse {
     private int expiresIn;
     private String idToken;
 
-
     private Map<String,String> otherData;
+    private Map<String,Object> userProfile;
 
     public Map<String, String> getOtherData() {
         return otherData;
     }
 
-    public void setOtherData(Map<String, String> otherData) {
-        this.otherData = otherData;
+    public String getOauthToken() {
+        return oauthToken;
     }
 
-    public GiggleResponse withOauthToken(final String oauthToken) {
+    public String getAccessToken() {
+        return accessToken;
+    }
+
+    public String getTokenType() {
+        return tokenType;
+    }
+
+    public int getExpiresIn() {
+        return expiresIn;
+    }
+
+    public String getIdToken() {
+        return idToken;
+    }
+
+    public Map<String, Object> getUserProfile() {
+        return userProfile;
+    }
+
+    /** Package level to make this immutable outside the package **/
+    GiggleResponse withOauthToken(final String oauthToken) {
         this.oauthToken = oauthToken;
         return this;
     }
 
-    public GiggleResponse withAccessToken(final String accessToken) {
+    GiggleResponse withAccessToken(final String accessToken) {
         this.accessToken = accessToken;
         return this;
     }
 
-    public GiggleResponse withTokenType(final String tokenType) {
+    GiggleResponse withTokenType(final String tokenType) {
         this.tokenType = tokenType;
         return this;
     }
 
-    public GiggleResponse withExpiresIn(final int expiresIn) {
+    GiggleResponse withExpiresIn(final int expiresIn) {
         this.expiresIn = expiresIn;
         return this;
     }
 
-    public GiggleResponse withIdToken(final String idToken) {
+    GiggleResponse withIdToken(final String idToken) {
         this.idToken = idToken;
         return this;
     }
 
-    public GiggleResponse withOtherData(final Map<String, String> otherData) {
+    GiggleResponse withOtherData(final Map<String, String> otherData) {
         this.otherData = otherData;
+        return this;
+    }
+
+    GiggleResponse withUserProfile(final Map<String, Object> userProfile) {
+        this.userProfile = userProfile;
         return this;
     }
 
@@ -61,6 +87,7 @@ public class GiggleResponse {
         String json = "";
         try
         {
+            // TODO: Improve this - this aint very smart
             json = new ObjectMapper().writeValueAsString(this);
         }
         catch (Exception e)

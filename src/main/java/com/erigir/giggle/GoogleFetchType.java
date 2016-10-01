@@ -5,7 +5,8 @@ package com.erigir.giggle;
  */
 public enum GoogleFetchType {
     CODE_ONLY("Fetch only the code"),
-    ACCESS_TOKEN("Fetch access token");
+    ACCESS_TOKEN("Fetch access token"),
+    PROFILE("Fetch access token and user profile");
 
     String label;
 
@@ -15,5 +16,10 @@ public enum GoogleFetchType {
 
     public String getLabel() {
         return label;
+    }
+
+    public boolean requiresSecret()
+    {
+        return this==ACCESS_TOKEN || this==PROFILE;
     }
 }

@@ -54,7 +54,7 @@ public class TestGiggleConfig extends Application{
         pane.getChildren().add(label);
 
         GoogleExchanger exchanger = new GoogleExchanger.GoogleExchangerBuilder().withClientId(appId).withClientSecret(appSecret)
-                .withRedirectUri(redirUrl).withFetchType(GoogleFetchType.CODE_ONLY).build();
+                .withRedirectUri(redirUrl).withFetchType(GoogleFetchType.PROFILE).build();
         // Setup giggle
         giggle = new Giggle(exchanger);//,appSecret,redirUrl);
 

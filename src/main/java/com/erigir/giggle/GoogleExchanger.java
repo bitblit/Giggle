@@ -16,9 +16,7 @@ import java.io.*;
 import java.math.BigInteger;
 import java.net.*;
 import java.security.SecureRandom;
-import java.util.Map;
-import java.util.Objects;
-import java.util.TreeMap;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -36,6 +34,7 @@ public class GoogleExchanger{
     private String redirectUri;
     private GoogleFetchType fetchType;
     private int returnPort = 65100; // Default Giggle port
+    private String scopeString;
 
     // Create a state token to prevent request forgery.
     // Store it in the session for later validation.
@@ -60,20 +59,24 @@ public class GoogleExchanger{
 
         rval = new GiggleResponse().withOtherData(params).withOauthToken(params.remove("code"));
 
-        if (fetchType==GoogleFetchType.ACCESS_TOKEN)
+        if (fetchType == GoogleFetchType.ACCESS_TOKEN || fetchType==GoogleFetchType.PROFILE)
         {
-            String dataString = exchangeCodeForTokens(params.get("code"));
-            try {
-                Map<String, String> data = new ObjectMapper().readValue(dataString, Map.class);
+            Map<String, String> data = exchangeCodeForTokens(rval.getOauthToken());
 
-                rval = rval.withAccessToken(data.get("access_token")).withExpiresIn(Integer.parseInt(String.valueOf(data.get("expires_in"))))
-                        .withIdToken(data.get("id_token")).withTokenType(data.get("token_type"));
-            }
-            catch (IOException ioe)
+            rval = rval.withAccessToken(data.get("access_token"))
+                    .withIdToken(data.get("id_token")).withTokenType(data.get("token_type"));
+
+            Object expires = data.get("expires_in");
+            if (expires!=null && Integer.class.isAssignableFrom(expires.getClass()))
             {
-                throw new RuntimeException(ioe);
+                rval.withExpiresIn((Integer)expires);
             }
-        }
+
+            if (fetchType==GoogleFetchType.PROFILE)
+            {
+                rval.withUserProfile(fetchUserProfile(rval.getAccessToken()));
+            }
+       }
 
         return rval;
     }
@@ -103,7 +106,7 @@ public class GoogleExchanger{
         return rval;
     }
 
-    final String exchangeCodeForTokens(String code)
+    final Map<String,String> exchangeCodeForTokens(String code)
     {
         try {
             String url = "https://www.googleapis.com/oauth2/v4/token";
@@ -124,19 +127,31 @@ public class GoogleExchanger{
             int responseCode = con.getResponseCode();
 
             InputStream src = (responseCode==200)?con.getInputStream():con.getErrorStream();
-            BufferedReader in = new BufferedReader(
-                    new InputStreamReader(src));
-            String inputLine;
-            StringBuffer response = new StringBuffer();
+            Map<String,String> rval = new ObjectMapper().readValue(src, Map.class);
+            return rval;
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
 
-            while ((inputLine = in.readLine()) != null) {
-                response.append(inputLine);
-            }
-            in.close();
+    final Map<String,Object> fetchUserProfile(String accessToken)
+    {
+        try {
+            String url = "https://www.googleapis.com/oauth2/v1/userinfo?access_token="+accessToken;
+            URL obj = new URL(url);
+            HttpsURLConnection con = (HttpsURLConnection) obj.openConnection();
 
+            //add request header
+            con.setRequestMethod("GET");
 
-            //print result
-            return response.toString();
+            int responseCode = con.getResponseCode();
+
+            InputStream src = (responseCode==200)?con.getInputStream():con.getErrorStream();
+            Map<String,Object> rval = new ObjectMapper().readValue(src, Map.class);
+
+            return rval;
         }
         catch (Exception e)
         {
@@ -161,12 +176,12 @@ public class GoogleExchanger{
             StringBuilder sb = new StringBuilder();
             sb.append("https://accounts.google.com/o/oauth2/v2/auth?")
                     .append("client_id=").append(clientId)
-                    .append("&response_type=code&scope=openid%20email&redirect_uri=http://localhost:")
+                    .append("&response_type=code&scope=").append(URLEncoder.encode(scopeString, "UTF-8")).append("&redirect_uri=http://localhost:")
                     .append(returnPort).append("&state=")
                     .append(securityState);
             return new URI(sb.toString());
         }
-        catch (URISyntaxException use)
+        catch (URISyntaxException | UnsupportedEncodingException use)
         {
             throw new RuntimeException("Cant happen",use);
         }
@@ -179,15 +194,17 @@ public class GoogleExchanger{
         private String redirectUri;
         private GoogleFetchType fetchType;
         private int returnPort = 65100; // Default Giggle port
+        private String scopeString = "openid email profile";
 
         public GoogleExchanger build()
         {
             Objects.requireNonNull(clientId, "Client Id is required");
             Objects.requireNonNull(fetchType, "Fetch type is required");
-            if (fetchType==GoogleFetchType.ACCESS_TOKEN)
+            Objects.requireNonNull(scopeString, "Scope string is required");
+            if (fetchType.requiresSecret())
             {
-                Objects.requireNonNull(clientSecret, "Client Secret is required if fetch type is ACCESS_TOKEN");
-                Objects.requireNonNull(redirectUri, "Redirect URI is required if fetch type is ACCESS_TOKEN");
+                Objects.requireNonNull(clientSecret, "Client Secret is required for this fetch type");
+                Objects.requireNonNull(redirectUri, "Redirect URI is required for this fetch type");
             }
             GoogleExchanger rval = new GoogleExchanger();
             rval.clientId = clientId;
@@ -195,6 +212,7 @@ public class GoogleExchanger{
             rval.redirectUri = redirectUri;
             rval.fetchType = fetchType;
             rval.returnPort = returnPort;
+            rval.scopeString = scopeString;
             return rval;
         }
 
@@ -220,6 +238,11 @@ public class GoogleExchanger{
 
         public GoogleExchangerBuilder withReturnPort(final int returnPort) {
             this.returnPort = returnPort;
+            return this;
+        }
+
+        public GoogleExchangerBuilder withScopeString(final String scopeString) {
+            this.scopeString = scopeString;
             return this;
         }
 
